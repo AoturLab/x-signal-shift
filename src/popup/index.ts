@@ -1,16 +1,9 @@
 import { DEFAULT_THEMES } from "@shared/constants"
 import { sendRuntimeMessage } from "@shared/messages"
+import { buildPanelMarkup, panelBaseStyles } from "@shared/panel-view"
 import { buildCustomThemePlan, buildThemePlan } from "@strategy/theme-expander"
 import { defaultSettings } from "@shared/storage"
-import type {
-  DailyMetric,
-  ExecutionLogEntry,
-  LanguagePreference,
-  RiskLevel,
-  SessionState,
-  StatsSnapshot,
-  UserSettings
-} from "@shared/types"
+import type { LanguagePreference, RiskLevel, SessionState, StatsSnapshot, UserSettings } from "@shared/types"
 
 interface PopupState {
   settings: UserSettings
@@ -24,54 +17,8 @@ interface StartResponse {
 }
 
 function render(state: PopupState): string {
-  const themeNames = state.settings.themes.map((theme) => theme.name).join(", ")
-  const statusClass = state.session.status === "running" ? "status-live" : "status-idle"
-  const todayMetric = state.stats.dailyMetrics[state.stats.dailyMetrics.length - 1]
-  const trendRows = state.stats.dailyMetrics
-    .slice()
-    .reverse()
-    .map((metric) => renderTrendRow(metric))
-    .join("")
-  const logRows = state.stats.recentLogs
-    .slice()
-    .reverse()
-    .map((entry) => renderLogRow(entry))
-    .join("")
-  const totalActions = state.session.currentPlan?.actions.length ?? 0
-  const currentStep = totalActions === 0 ? 0 : Math.min(state.session.currentActionIndex + 1, totalActions)
-
   return `
-    <section class="panel">
-      <div>
-        <h1>反馈回路纠偏器</h1>
-        <p>自动搜索、浏览、停留和低频互动，逐步重塑 X 对账号的兴趣画像。</p>
-      </div>
-      <div class="stats">
-        <div class="stat">
-          <span>状态</span>
-          <strong class="${statusClass}">${state.session.status}</strong>
-        </div>
-        <div class="stat">
-          <span>今日会话</span>
-          <strong>${todayMetric?.sessionsStarted ?? 0}</strong>
-        </div>
-        <div class="stat">
-          <span>成功/失败</span>
-          <strong>${state.stats.sessionsSucceeded}/${state.stats.sessionsFailed}</strong>
-        </div>
-        <div class="stat">
-          <span>目标曝光率</span>
-          <strong>${(state.stats.targetThemeExposureRate * 100).toFixed(0)}%</strong>
-        </div>
-        <div class="stat">
-          <span>作者多样性</span>
-          <strong>${state.stats.authorDiversityScore.toFixed(2)}</strong>
-        </div>
-      </div>
-      <div class="hint">当前主题：${themeNames || "未设置"}</div>
-      <div class="hint">当前步骤：${currentStep}/${totalActions} ${state.session.currentActionLabel ?? ""}</div>
-      ${state.session.lastError ? `<div class="hint">最近错误：${state.session.lastError}</div>` : ""}
-    </section>
+    ${buildPanelMarkup(state)}
 
     <section class="panel">
       <div class="row">
@@ -113,40 +60,19 @@ function render(state: PopupState): string {
         <label for="sessionCount">每日会话数</label>
         <input id="sessionCount" type="number" min="1" max="12" value="${state.settings.dailySessionCount}" />
       </div>
+      <div class="row">
+        <label for="sessionMin">单次最短时长（秒）</label>
+        <input id="sessionMin" type="number" min="60" max="3600" value="${state.settings.sessionDurationMinSec}" />
+      </div>
+      <div class="row">
+        <label for="sessionMax">单次最长时长（秒）</label>
+        <input id="sessionMax" type="number" min="60" max="5400" value="${state.settings.sessionDurationMaxSec}" />
+      </div>
       <button id="saveBtn">保存配置</button>
       <button id="startBtn">${state.settings.enabled ? "启动自动训练" : "启用并启动"}</button>
       <button id="stopBtn" class="secondary">停止</button>
     </section>
-
-    <section class="panel">
-      <div>
-        <h1>每日趋势</h1>
-        <p>最近 7 天的训练结果。</p>
-      </div>
-      <div class="hint">日期 | 会话 | 成功/失败 | 动作 | 曝光率 | 多样性</div>
-      ${trendRows || '<div class="hint">还没有趋势数据</div>'}
-    </section>
-
-    <section class="panel">
-      <div>
-        <h1>执行日志</h1>
-        <p>最近 50 条动作事件。</p>
-      </div>
-      ${logRows || '<div class="hint">还没有日志</div>'}
-    </section>
   `
-}
-
-function renderTrendRow(metric: DailyMetric): string {
-  return `<div class="hint">${metric.day} | ${metric.sessionsStarted} | ${metric.sessionsSucceeded}/${metric.sessionsFailed} | ${metric.actionsCompleted} | ${(metric.targetThemeExposureRate * 100).toFixed(0)}% | ${metric.authorDiversityScore.toFixed(2)}</div>`
-}
-
-function renderLogRow(entry: ExecutionLogEntry): string {
-  const time = new Date(entry.time).toLocaleTimeString("zh-CN", { hour12: false })
-  const tone = entry.level === "error" ? "#fda4af" : entry.level === "success" ? "#86efac" : "#93c5fd"
-  return `<div class="hint" style="color:${tone}">${time} | #${entry.actionIndex + 1} | ${entry.actionType} | ${entry.message}${
-    entry.durationMs ? ` | ${entry.durationMs}ms` : ""
-  }${entry.pageBefore || entry.pageAfter ? ` | ${entry.pageBefore ?? "-"} -> ${entry.pageAfter ?? "-"}` : ""}</div>`
 }
 
 async function loadState(): Promise<PopupState> {
@@ -166,6 +92,12 @@ function collectSettings(current: UserSettings): UserSettings {
     (document.querySelector<HTMLSelectElement>("#languagePreference")?.value as LanguagePreference) ?? "bilingual"
   const riskLevel = (document.querySelector<HTMLSelectElement>("#riskLevel")?.value as RiskLevel) ?? "conservative"
   const dailySessionCount = Number(document.querySelector<HTMLInputElement>("#sessionCount")?.value ?? current.dailySessionCount)
+  const sessionDurationMinSec = Number(
+    document.querySelector<HTMLInputElement>("#sessionMin")?.value ?? current.sessionDurationMinSec
+  )
+  const sessionDurationMaxSec = Number(
+    document.querySelector<HTMLInputElement>("#sessionMax")?.value ?? current.sessionDurationMaxSec
+  )
   const selectedThemePlans = (selectedThemes.length ? selectedThemes : DEFAULT_THEMES.slice(0, 1)).map((theme) =>
     buildThemePlan(theme, 1, languagePreference)
   )
@@ -179,6 +111,8 @@ function collectSettings(current: UserSettings): UserSettings {
     riskLevel,
     languagePreference,
     dailySessionCount,
+    sessionDurationMinSec: Math.min(sessionDurationMinSec, sessionDurationMaxSec),
+    sessionDurationMaxSec: Math.max(sessionDurationMinSec, sessionDurationMaxSec),
     themes
   }
 }

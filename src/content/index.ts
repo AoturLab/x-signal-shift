@@ -1,6 +1,7 @@
 import { collectFeedSnapshot, detectPageKind } from "./page-adapters"
 import { executeAction, waitForPageReady } from "./actions"
 import type { RuntimeEnvelope } from "@shared/messages"
+import { buildPanelMarkup, panelBaseStyles } from "@shared/panel-view"
 import type { ActionPlan, ExecutionLogEntry, SessionPlan, SessionState, UserSettings } from "@shared/types"
 import { defaultSessionState, defaultSettings, getSessionState, getSettings, setSessionState } from "@shared/storage"
 
@@ -57,14 +58,14 @@ function ensureControlPanel(): void {
   const shadow = host.attachShadow({ mode: "open" })
   const style = document.createElement("style")
   style.textContent = `
-    :host { all: initial; }
+    ${panelBaseStyles}
     .wrap {
       position: fixed;
       right: 18px;
       top: 52%;
       transform: translateY(-50%);
       z-index: 2147483646;
-      font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-family: "SF Pro Display", "Segoe UI", ui-sans-serif, sans-serif;
       color: #f8fafc;
     }
     .fab {
@@ -81,84 +82,50 @@ function ensureControlPanel(): void {
       font-weight: 700;
       color: white;
     }
-    .panel {
+    .dock {
       position: absolute;
       right: 72px;
       top: 50%;
       transform: translateY(-50%);
-      width: 320px;
+      width: 332px;
       max-height: 72vh;
       overflow: auto;
-      border-radius: 18px;
-      border: 1px solid rgba(51, 65, 85, 0.9);
-      background: rgba(15, 23, 32, 0.96);
-      box-shadow: 0 18px 46px rgba(2, 8, 23, 0.4);
-      padding: 14px;
       display: none;
       gap: 10px;
-      backdrop-filter: blur(10px);
     }
-    .panel.open { display: grid; }
-    .title { font-size: 16px; font-weight: 700; }
-    .muted, .log { font-size: 12px; color: #94a3b8; }
-    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-    .card {
-      border: 1px solid rgba(51, 65, 85, 0.9);
-      border-radius: 12px;
-      padding: 10px;
-      background: rgba(255,255,255,0.03);
-    }
-    .card strong { display: block; font-size: 15px; color: #f8fafc; }
+    .dock.open { display: grid; }
     .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
     .btn {
-      border-radius: 12px;
+      border-radius: 14px;
       border: 0;
       padding: 10px 12px;
       cursor: pointer;
       color: white;
       font-weight: 600;
     }
-    .btn.start { background: linear-gradient(135deg, #0284c7, #22d3ee); }
-    .btn.stop { background: #1e3a5f; }
-    .logbox {
-      display: grid;
-      gap: 6px;
-      border: 1px solid rgba(51, 65, 85, 0.9);
-      border-radius: 12px;
-      padding: 10px;
-      max-height: 220px;
-      overflow: auto;
-      background: rgba(255,255,255,0.02);
-    }
-    .step {
-      font-size: 12px;
-      color: #cbd5e1;
-      padding: 8px 10px;
-      border-radius: 10px;
-      background: rgba(2,132,199,0.12);
-    }
+    .btn.start { background: linear-gradient(135deg, var(--accent-2), var(--accent)); }
+    .btn.stop { background: linear-gradient(135deg, rgba(29,78,216,0.65), rgba(30,58,95,0.95)); }
   `
 
   const container = document.createElement("div")
   container.className = "wrap"
   container.innerHTML = `
     <button class="fab" id="fab" title="SignalShift">S</button>
-    <section class="panel" id="panel">
-      <div class="title">SignalShift</div>
-      <div class="muted" id="themes">Loading…</div>
-      <div class="grid">
-        <div class="card"><span class="muted">状态</span><strong id="status">idle</strong></div>
-        <div class="card"><span class="muted">当前步骤</span><strong id="step">0/0</strong></div>
-        <div class="card"><span class="muted">今日会话</span><strong id="sessions">0</strong></div>
-        <div class="card"><span class="muted">曝光率</span><strong id="exposure">0%</strong></div>
-      </div>
-      <div class="step" id="actionLabel">当前动作：-</div>
+    <section class="dock" id="panel">
+      <div id="panel-content"></div>
+      <section class="panel">
+        <div class="section-head">
+          <div>
+            <div class="eyebrow">Control</div>
+            <h2>快速操作</h2>
+          </div>
+          <p>直接在页面内控制运行</p>
+        </div>
       <div class="actions">
         <button class="btn start" id="start">启动</button>
         <button class="btn stop" id="stop">停止</button>
       </div>
-      <div class="muted" id="error"></div>
-      <div class="logbox" id="logs"></div>
+      </section>
     </section>
   `
 
@@ -201,33 +168,7 @@ async function renderControlPanel(shadow: ShadowRoot): Promise<void> {
   const state = await fetchControlPanelState().catch(() => null)
   if (!state) return
 
-  const todayMetric = state.stats.dailyMetrics[state.stats.dailyMetrics.length - 1]
-  const totalActions = state.session.currentPlan?.actions.length ?? 0
-  const currentStep = totalActions === 0 ? 0 : Math.min(state.session.currentActionIndex + 1, totalActions)
-  const logs = state.stats.recentLogs.slice().reverse().slice(0, 12)
-
-  ;(shadow.getElementById("themes") as HTMLElement).textContent = `主题：${state.settings.themes.map((theme) => theme.name).join(", ")}`
-  ;(shadow.getElementById("status") as HTMLElement).textContent = state.session.status
-  ;(shadow.getElementById("step") as HTMLElement).textContent = `${currentStep}/${totalActions}`
-  ;(shadow.getElementById("sessions") as HTMLElement).textContent = String(todayMetric?.sessionsStarted ?? 0)
-  ;(shadow.getElementById("exposure") as HTMLElement).textContent = `${Math.round(state.stats.targetThemeExposureRate * 100)}%`
-  ;(shadow.getElementById("actionLabel") as HTMLElement).textContent = `当前动作：${state.session.currentActionLabel ?? "-"}`
-  ;(shadow.getElementById("error") as HTMLElement).textContent = state.session.lastError ? `失败定位：${state.session.lastError}` : ""
-  ;(shadow.getElementById("logs") as HTMLElement).innerHTML =
-    logs.length > 0
-      ? logs
-          .map(
-            (entry) =>
-              `<div class="log" style="color:${
-                entry.level === "error" ? "#fda4af" : entry.level === "success" ? "#86efac" : "#93c5fd"
-              }">${new Date(entry.time).toLocaleTimeString("zh-CN", { hour12: false })} | #${entry.actionIndex + 1} | ${
-                entry.actionType
-              } | ${entry.message}${entry.durationMs ? ` | ${entry.durationMs}ms` : ""}${
-                entry.pageBefore || entry.pageAfter ? ` | ${entry.pageBefore ?? "-"} -> ${entry.pageAfter ?? "-"}` : ""
-              }</div>`
-          )
-          .join("")
-      : '<div class="log">还没有日志</div>'
+  ;(shadow.getElementById("panel-content") as HTMLElement).innerHTML = buildPanelMarkup(state)
 }
 
 async function emitActionEvent(
@@ -266,49 +207,60 @@ async function runPlan(plan: SessionPlan, settings: UserSettings, startIndex = 0
     for (let index = startIndex; index < plan.actions.length; index += 1) {
       const action = plan.actions[index]
       if (aborted || activePlanId !== plan.id) break
+      const actionLabel = action.type === "search" ? `${action.type}:${action.queryLabel ?? action.query ?? action.theme}` : action.type
       const pageBefore = detectPageKind()
       const actionStartedAt = Date.now()
       try {
-        await updateProgress(plan, index, { status: "running", currentActionLabel: action.type })
+        await updateProgress(plan, index, { status: "running", currentActionLabel: actionLabel })
         await emitActionEvent(
-          buildLogEntry(index, action.type, `Starting ${action.type} for ${action.theme}`, "info", {
+          buildLogEntry(index, action.type, `Starting ${action.type} for ${action.queryLabel ?? action.theme}`, "info", {
             pageBefore,
             pageAfter: pageBefore
           }),
           index,
-          action.type
+          actionLabel
         )
         await executeAction(action, settings.themes)
         actionsCompleted += 1
         const pageAfter = detectPageKind()
         const durationMs = Date.now() - actionStartedAt
-        await updateProgress(plan, index + 1, { lastError: null, currentActionLabel: plan.actions[index + 1]?.type ?? null })
+        const nextActionLabel = plan.actions[index + 1]
+          ? plan.actions[index + 1].type === "search"
+            ? `${plan.actions[index + 1].type}:${plan.actions[index + 1].queryLabel ?? plan.actions[index + 1].query ?? plan.actions[index + 1].theme}`
+            : plan.actions[index + 1].type
+          : null
+        await updateProgress(plan, index + 1, { lastError: null, currentActionLabel: nextActionLabel })
         await emitActionEvent(
-          buildLogEntry(index, action.type, `Completed ${action.type} for ${action.theme}`, "success", {
+          buildLogEntry(index, action.type, `Completed ${action.type} for ${action.queryLabel ?? action.theme}`, "success", {
             durationMs,
             pageBefore,
             pageAfter
           }),
           index + 1,
-          plan.actions[index + 1]?.type ?? null
+          nextActionLabel
         )
       } catch (error) {
         const message = error instanceof Error ? error.message : `Unknown failure in ${action.type}`
         failures.push(`${action.type}: ${message}`)
         const pageAfter = detectPageKind()
         const durationMs = Date.now() - actionStartedAt
+        const nextActionLabel = plan.actions[index + 1]
+          ? plan.actions[index + 1].type === "search"
+            ? `${plan.actions[index + 1].type}:${plan.actions[index + 1].queryLabel ?? plan.actions[index + 1].query ?? plan.actions[index + 1].theme}`
+            : plan.actions[index + 1].type
+          : null
         await updateProgress(plan, index + 1, {
           lastError: message,
-          currentActionLabel: plan.actions[index + 1]?.type ?? null
+          currentActionLabel: nextActionLabel
         })
         await emitActionEvent(
-          buildLogEntry(index, action.type, `Failed ${action.type}: ${message}`, "error", {
+          buildLogEntry(index, action.type, `Failed ${action.type} for ${action.queryLabel ?? action.theme}: ${message}`, "error", {
             durationMs,
             pageBefore,
             pageAfter
           }),
           index + 1,
-          plan.actions[index + 1]?.type ?? null
+          nextActionLabel
         )
 
         if (window.history.length > 1 && action.type !== "search" && action.type !== "observeHome") {

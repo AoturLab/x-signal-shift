@@ -37,6 +37,7 @@ export interface ActionPlan {
   type: ActionType
   theme: string
   query?: string
+  queryLabel?: string
   dwellMs?: number
   maxItems?: number
   probability?: number

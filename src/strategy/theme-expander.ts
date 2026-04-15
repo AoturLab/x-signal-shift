@@ -6,12 +6,12 @@ function normalizeLanguages(preference: LanguagePreference): Array<"zh" | "en"> 
 }
 
 const themeDictionary: Record<string, string[]> = {
-  AI: ["ai", "artificial intelligence", "llm", "machine learning", "人工智能"],
-  科技: ["tech", "technology", "engineering", "科技", "软件"],
-  科学: ["science", "research", "biology", "physics", "科研", "科学"],
-  政治: ["politics", "policy", "election", "外交", "政治"],
-  财经: ["finance", "economy", "markets", "投资", "宏观"],
-  艺术: ["art", "design", "museum", "艺术", "视觉"]
+  AI: ["ai", "artificial intelligence", "llm", "machine learning", "人工智能", "openai", "anthropic", "deep learning"],
+  科技: ["tech", "technology", "engineering", "科技", "软件", "product launch", "developer tools", "chip"],
+  科学: ["science", "research", "biology", "physics", "科研", "科学", "peer review", "journal", "study"],
+  政治: ["politics", "policy", "election", "外交", "政治", "public policy", "geopolitics", "government"],
+  财经: ["finance", "economy", "markets", "投资", "宏观", "stocks", "macro", "interest rate"],
+  艺术: ["art", "design", "museum", "艺术", "视觉", "creative direction", "illustration", "gallery"]
 }
 
 export function buildThemePlan(
