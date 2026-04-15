@@ -1,0 +1,24 @@
+{
+  "name": "xpost",
+  "version": "0.1.0",
+  "description": "X feedback loop rewriter browser extension",
+  "scripts": {
+    "build": "tsup && node scripts/copy-static.mjs",
+    "typecheck": "tsc --noEmit",
+    "release": "npm run build && node scripts/package-release.mjs"
+  },
+  "keywords": [
+    "extension",
+    "manifest-v3",
+    "x",
+    "automation"
+  ],
+  "author": "",
+  "license": "MIT",
+  "type": "commonjs",
+  "devDependencies": {
+    "@types/chrome": "^0.1.40",
+    "tsup": "^8.5.1",
+    "typescript": "^6.0.2"
+  }
+}
