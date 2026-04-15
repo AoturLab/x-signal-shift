@@ -129,6 +129,15 @@ export interface ActionExecutionResult {
   targetUrl?: string
 }
 
+export interface ActionPreparationResult {
+  status: "execute" | "navigate" | "skipped" | "failed"
+  message: string
+  durationMs: number
+  pageBefore: PageKind
+  pageAfter: PageKind
+  targetUrl?: string
+}
+
 export interface StrategyProfile {
   dailySessionCount: number
   sessionDurationMinSec: number
@@ -148,7 +157,10 @@ export interface RuntimeMessageMap {
   SAVE_SETTINGS: UserSettings
   START_AUTOMATION: undefined
   STOP_AUTOMATION: undefined
-  EXECUTE_ACTION: { action: ActionPlan; actionIndex: number; themes: ThemePlan[] }
+  OPEN_CONTROL_CENTER: undefined
+  OPEN_DRAWER: undefined
+  PREPARE_ACTION: { action: ActionPlan; actionIndex: number; themes: ThemePlan[] }
+  EXECUTE_IN_PLACE: { action: ActionPlan; actionIndex: number; themes: ThemePlan[] }
   GET_PAGE_CONTEXT: undefined
   COLLECT_FEED_SNAPSHOT: { themes: ThemePlan[] }
   CONTENT_READY: PageContext

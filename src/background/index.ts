@@ -15,6 +15,7 @@ import {
 import type {
   ActionExecutionResult,
   ActionPlan,
+  ActionPreparationResult,
   ExecutionLogEntry,
   FeedSnapshot,
   PageContext,
@@ -27,6 +28,10 @@ import type {
 const TRAINING_ALARM = "training-session"
 const CONTENT_READY_TIMEOUT_MS = 18000
 let dispatchInFlight = false
+
+function isNavigationAction(action: ActionPlan): boolean {
+  return action.type === "search" || action.type === "openDetail" || action.type === "openAuthor" || action.type === "observeHome"
+}
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -70,6 +75,25 @@ async function queryActiveXTab(): Promise<chrome.tabs.Tab | null> {
 
   const anyTabs = await chrome.tabs.query({})
   return anyTabs.find((tab) => tab.id && tab.url && /https:\/\/(x|twitter)\.com\//.test(tab.url)) ?? null
+}
+
+async function ensureXTab(): Promise<chrome.tabs.Tab> {
+  const existing = await queryActiveXTab()
+  if (existing?.id) return existing
+
+  const created = await chrome.tabs.create({ url: "https://x.com/home", active: true })
+  if (!created.id) {
+    throw new Error("Unable to open an X tab.")
+  }
+  return created
+}
+
+async function openDrawerOnTab(tabId: number): Promise<void> {
+  await probePageContext(tabId, 12000)
+  await chrome.tabs.sendMessage(tabId, {
+    type: "OPEN_DRAWER",
+    payload: undefined
+  } satisfies RuntimeEnvelope<"OPEN_DRAWER">)
 }
 
 async function updateSessionState(partial: Partial<SessionState>): Promise<SessionState> {
@@ -246,17 +270,114 @@ async function dispatchNextAction(): Promise<void> {
       buildLogEntry(session.currentActionIndex, action.type, `Starting ${action.type} for ${action.queryLabel ?? action.theme}`, "info")
     )
 
+    if (isNavigationAction(action)) {
+      let prepared: ActionPreparationResult
+
+      try {
+        prepared = (await chrome.tabs.sendMessage(tabId, {
+          type: "PREPARE_ACTION",
+          payload: {
+            action,
+            actionIndex: session.currentActionIndex,
+            themes: settings.themes
+          }
+        } satisfies RuntimeEnvelope<"PREPARE_ACTION">)) as ActionPreparationResult
+      } catch (error) {
+        await failSession(
+          error instanceof Error
+            ? `Failed to prepare ${action.type}. (${error.message})`
+            : `Failed to prepare ${action.type}.`,
+          action,
+          session.currentActionIndex
+        )
+        return
+      }
+
+      const nextActionIndex = session.currentActionIndex + 1
+      const nextActionLabel = buildActionLabel(session.currentPlan.actions[nextActionIndex])
+
+      if (prepared.status === "failed") {
+        await appendLog(
+          buildLogEntry(session.currentActionIndex, action.type, prepared.message, "error", {
+            durationMs: prepared.durationMs,
+            pageBefore: prepared.pageBefore,
+            pageAfter: prepared.pageAfter
+          })
+        )
+        await updateSessionState({
+          currentActionIndex: nextActionIndex,
+          currentActionLabel: nextActionLabel,
+          lastKnownPageKind: prepared.pageAfter,
+          lastError: prepared.message
+        })
+        void dispatchNextAction()
+        return
+      }
+
+      if (prepared.status === "skipped") {
+        await appendLog(
+          buildLogEntry(session.currentActionIndex, action.type, prepared.message, "info", {
+            durationMs: prepared.durationMs,
+            pageBefore: prepared.pageBefore,
+            pageAfter: prepared.pageAfter
+          })
+        )
+        await updateSessionState({
+          currentActionIndex: nextActionIndex,
+          currentActionLabel: nextActionLabel,
+          lastKnownPageKind: prepared.pageAfter,
+          lastError: null
+        })
+        void dispatchNextAction()
+        return
+      }
+
+      if (prepared.status === "navigate") {
+        if (!prepared.targetUrl) {
+          await failSession(`Missing navigation target for ${action.type}.`, action, session.currentActionIndex)
+          return
+        }
+
+        try {
+          await chrome.tabs.update(tabId, { url: prepared.targetUrl })
+        } catch (error) {
+          await failSession(
+            error instanceof Error ? `Failed to navigate to target page. (${error.message})` : "Failed to navigate to target page.",
+            action,
+            session.currentActionIndex
+          )
+          return
+        }
+
+        await appendLog(
+          buildLogEntry(session.currentActionIndex, action.type, prepared.message, "success", {
+            durationMs: prepared.durationMs,
+            pageBefore: prepared.pageBefore,
+            pageAfter: prepared.pageAfter
+          })
+        )
+        await updateSessionState({
+          currentActionIndex: nextActionIndex,
+          currentActionLabel: nextActionLabel,
+          pendingNavigation: true,
+          lastKnownPageKind: prepared.pageAfter,
+          lastError: null
+        })
+        return
+      }
+    }
+
     let result: ActionExecutionResult
 
     try {
       result = (await chrome.tabs.sendMessage(tabId, {
-        type: "EXECUTE_ACTION",
+        type: "EXECUTE_IN_PLACE",
         payload: {
           action,
           actionIndex: session.currentActionIndex,
           themes: settings.themes
         }
-      } satisfies RuntimeEnvelope<"EXECUTE_ACTION">)) as ActionExecutionResult
+      } satisfies RuntimeEnvelope<"EXECUTE_IN_PLACE">)) as ActionExecutionResult
     } catch (error) {
       await failSession(
         error instanceof Error
@@ -293,36 +414,6 @@ async function dispatchNextAction(): Promise<void> {
       }
 
       void dispatchNextAction()
-      return
-    }
-
-    if (result.status === "navigating") {
-      if (result.targetUrl) {
-        try {
-          await chrome.tabs.update(tabId, { url: result.targetUrl })
-        } catch (error) {
-          await failSession(
-            error instanceof Error ? `Failed to navigate to target page. (${error.message})` : "Failed to navigate to target page.",
-            action,
-            session.currentActionIndex
-          )
-          return
-        }
-      }
-
-      await appendLog(
-        buildLogEntry(session.currentActionIndex, action.type, result.message, "success", {
-          durationMs: result.durationMs,
-          pageBefore: result.pageBefore,
-          pageAfter: result.pageAfter
-        })
-      )
-      await updateSessionState({
-        currentActionIndex: nextActionIndex,
-        currentActionLabel: nextActionLabel,
-        pendingNavigation: true,
-        lastKnownPageKind: result.pageAfter
-      })
       return
     }
 
@@ -366,8 +457,10 @@ async function startAutomation(): Promise<{ ok: boolean; reason?: string }> {
   }
 
   const settings = await getSettings()
+  const effectiveSettings = settings.enabled ? settings : { ...settings, enabled: true }
   if (!settings.enabled) {
-    return { ok: false, reason: "Automation is disabled in settings." }
+    await setSettings(effectiveSettings)
+    await syncAlarm(effectiveSettings)
   }
 
   const tab = await queryActiveXTab()
@@ -375,7 +468,7 @@ async function startAutomation(): Promise<{ ok: boolean; reason?: string }> {
     return { ok: false, reason: "No active X tab found." }
   }
 
-  const plan = buildSessionPlan(settings)
+  const plan = buildSessionPlan(effectiveSettings)
   await updateSessionState({
     status: "running",
     currentPlan: plan,
@@ -457,6 +550,23 @@ chrome.runtime.onMessage.addListener((message: RuntimeEnvelope, sender, sendResp
       }
       case "START_AUTOMATION": {
         sendResponse(await startAutomation())
+        return
+      }
+      case "OPEN_CONTROL_CENTER": {
+        try {
+          const tab = await ensureXTab()
+          if (!tab.id) {
+            sendResponse({ ok: false, reason: "Unable to open an X tab." })
+            return
+          }
+          await openDrawerOnTab(tab.id)
+          sendResponse({ ok: true })
+        } catch (error) {
+          sendResponse({
+            ok: false,
+            reason: error instanceof Error ? error.message : "Unable to open the control center."
+          })
+        }
         return
       }
       case "STOP_AUTOMATION": {

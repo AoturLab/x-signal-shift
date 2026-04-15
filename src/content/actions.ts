@@ -1,4 +1,4 @@
-import type { ActionExecutionResult, ActionPlan, PageKind, ThemePlan } from "@shared/types"
+import type { ActionExecutionResult, ActionPlan, ActionPreparationResult, PageKind, ThemePlan } from "@shared/types"
 import { SELECTORS } from "@shared/constants"
 import { buildSearchUrl, detectPageKind, getTweetArticles } from "./page-adapters"
 
@@ -86,25 +86,40 @@ function buildResult(
   }
 }
 
-export async function executeAction(action: ActionPlan, themes: ThemePlan[]): Promise<ActionExecutionResult> {
+function buildPrepareResult(
+  status: ActionPreparationResult["status"],
+  message: string,
+  startedAt: number,
+  pageBefore: PageKind,
+  pageAfter = detectPageKind(),
+  targetUrl?: string
+): ActionPreparationResult {
+  return {
+    status,
+    message,
+    durationMs: Date.now() - startedAt,
+    pageBefore,
+    pageAfter,
+    targetUrl
+  }
+}
+
+export async function prepareAction(action: ActionPlan, themes: ThemePlan[]): Promise<ActionPreparationResult> {
   const theme = themes.find((item) => item.name === action.theme)
   const startedAt = Date.now()
   const pageBefore = detectPageKind()
 
   switch (action.type) {
     case "search": {
-      if (!action.query) return buildResult("skipped", `Skipped search for ${action.theme}`, startedAt, pageBefore)
+      if (!action.query) return buildPrepareResult("skipped", `Skipped search for ${action.theme}`, startedAt, pageBefore)
 
       const targetUrl = buildSearchUrl(action.query)
       if (window.location.href === targetUrl) {
-        await waitForSearchResults(action.query, 14000)
-        await sleep(randomBetween(1400, 2600))
-        return buildResult("completed", `Completed search for ${action.queryLabel ?? action.theme}`, startedAt, pageBefore)
+        return buildPrepareResult("execute", `Search page ready for ${action.queryLabel ?? action.theme}`, startedAt, pageBefore)
       }
 
-      await sleep(randomBetween(120, 240))
-      return buildResult(
-        "navigating",
+      return buildPrepareResult(
+        "navigate",
         `Navigating search for ${action.queryLabel ?? action.theme}`,
         startedAt,
         pageBefore,
@@ -118,9 +133,8 @@ export async function executeAction(action: ActionPlan, themes: ThemePlan[]): Pr
       if (!detailLink?.href) {
         throw new Error("Missing target for openDetail")
       }
-      await sleep(randomBetween(120, 220))
-      return buildResult(
-        "navigating",
+      return buildPrepareResult(
+        "navigate",
         `Opening detail for ${action.queryLabel ?? action.theme}`,
         startedAt,
         pageBefore,
@@ -128,34 +142,58 @@ export async function executeAction(action: ActionPlan, themes: ThemePlan[]): Pr
         detailLink.href
       )
     }
-    case "dwell":
-      await sleep(action.dwellMs ?? randomBetween(18000, 42000))
-      return buildResult("completed", `Completed dwell for ${action.theme}`, startedAt, pageBefore)
-    case "expandReplies": {
-      const buttons = Array.from(document.querySelectorAll<HTMLDivElement>('[role="button"]'))
-      const candidate = buttons.find((button) => /reply|more replies|show/i.test(button.innerText))
-      if (!candidate) {
-        throw new Error("Missing target for expandReplies")
-      }
-      candidate.click()
-      await sleep(randomBetween(1200, 2400))
-      return buildResult("completed", `Expanded replies for ${action.theme}`, startedAt, pageBefore)
-    }
     case "openAuthor": {
       const target = await waitForCandidateArticle(theme)
       const profileLink = target.querySelector<HTMLAnchorElement>('a[role="link"][href^="/"]:not([href*="/status/"])')
       if (!profileLink?.href) {
         throw new Error("Missing target for openAuthor")
       }
-      await sleep(randomBetween(120, 220))
-      return buildResult(
-        "navigating",
+      return buildPrepareResult(
+        "navigate",
         `Opening author for ${action.queryLabel ?? action.theme}`,
         startedAt,
         pageBefore,
         "profile",
         profileLink.href
       )
+    }
+    case "observeHome":
+      if (!window.location.pathname.startsWith("/home")) {
+        return buildPrepareResult(
+          "navigate",
+          `Returning home for ${action.theme}`,
+          startedAt,
+          pageBefore,
+          "home",
+          "https://x.com/home"
+        )
+      }
+      return buildPrepareResult("execute", `Home ready for ${action.theme}`, startedAt, pageBefore, "home")
+    default:
+      return buildPrepareResult("execute", `Prepared ${action.type} for ${action.theme}`, startedAt, pageBefore)
+  }
+}
+
+export async function executeInPlaceAction(action: ActionPlan, _themes: ThemePlan[]): Promise<ActionExecutionResult> {
+  const startedAt = Date.now()
+  const pageBefore = detectPageKind()
+
+  switch (action.type) {
+    case "search":
+      if (!action.query) return buildResult("skipped", `Skipped search for ${action.theme}`, startedAt, pageBefore)
+      await waitForSearchResults(action.query, 14000)
+      await sleep(randomBetween(1400, 2600))
+      return buildResult("completed", `Completed search for ${action.queryLabel ?? action.theme}`, startedAt, pageBefore)
+    case "dwell":
+      await sleep(action.dwellMs ?? randomBetween(18000, 42000))
+      return buildResult("completed", `Completed dwell for ${action.theme}`, startedAt, pageBefore)
+    case "expandReplies": {
+      const buttons = Array.from(document.querySelectorAll<HTMLDivElement>('[role="button"]'))
+      const candidate = buttons.find((button) => /reply|more replies|show/i.test(button.innerText))
+      if (!candidate) throw new Error("Missing target for expandReplies")
+      candidate.click()
+      await sleep(randomBetween(1200, 2400))
+      return buildResult("completed", `Expanded replies for ${action.theme}`, startedAt, pageBefore)
     }
     case "scrollProfile":
       for (let i = 0; i < randomBetween(2, 4); i += 1) {
@@ -188,10 +226,6 @@ export async function executeAction(action: ActionPlan, themes: ThemePlan[]): Pr
       return buildResult("completed", `Followed account for ${action.theme}`, startedAt, pageBefore)
     }
     case "observeHome":
-      if (!window.location.pathname.startsWith("/home")) {
-        await sleep(randomBetween(120, 240))
-        return buildResult("navigating", `Returning home for ${action.theme}`, startedAt, pageBefore, "home", "https://x.com/home")
-      }
       for (let i = 0; i < randomBetween(2, 5); i += 1) {
         window.scrollBy({ top: randomBetween(380, 960), behavior: "smooth" })
         await sleep(randomBetween(1800, 4200))
