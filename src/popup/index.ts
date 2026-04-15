@@ -2,7 +2,7 @@ import { DEFAULT_THEMES } from "@shared/constants"
 import { sendRuntimeMessage } from "@shared/messages"
 import { buildThemePlan } from "@strategy/theme-expander"
 import { defaultSettings } from "@shared/storage"
-import type { LanguagePreference, RiskLevel, SessionState, StatsSnapshot, UserSettings } from "@shared/types"
+import type { DailyMetric, LanguagePreference, RiskLevel, SessionState, StatsSnapshot, UserSettings } from "@shared/types"
 
 interface PopupState {
   settings: UserSettings
@@ -13,6 +13,12 @@ interface PopupState {
 function render(state: PopupState): string {
   const themeNames = state.settings.themes.map((theme) => theme.name).join(", ")
   const statusClass = state.session.status === "running" ? "status-live" : "status-idle"
+  const todayMetric = state.stats.dailyMetrics[state.stats.dailyMetrics.length - 1]
+  const trendRows = state.stats.dailyMetrics
+    .slice()
+    .reverse()
+    .map((metric) => renderTrendRow(metric))
+    .join("")
 
   return `
     <section class="panel">
@@ -27,7 +33,11 @@ function render(state: PopupState): string {
         </div>
         <div class="stat">
           <span>今日会话</span>
-          <strong>${state.stats.sessionsStarted}</strong>
+          <strong>${todayMetric?.sessionsStarted ?? 0}</strong>
+        </div>
+        <div class="stat">
+          <span>成功/失败</span>
+          <strong>${state.stats.sessionsSucceeded}/${state.stats.sessionsFailed}</strong>
         </div>
         <div class="stat">
           <span>目标曝光率</span>
@@ -39,6 +49,7 @@ function render(state: PopupState): string {
         </div>
       </div>
       <div class="hint">当前主题：${themeNames || "未设置"}</div>
+      ${state.session.lastError ? `<div class="hint">最近错误：${state.session.lastError}</div>` : ""}
     </section>
 
     <section class="panel">
@@ -85,7 +96,20 @@ function render(state: PopupState): string {
       <button id="startBtn">${state.settings.enabled ? "启动自动训练" : "启用并启动"}</button>
       <button id="stopBtn" class="secondary">停止</button>
     </section>
+
+    <section class="panel">
+      <div>
+        <h1>每日趋势</h1>
+        <p>最近 7 天的训练结果。</p>
+      </div>
+      <div class="hint">日期 | 会话 | 成功/失败 | 动作 | 曝光率 | 多样性</div>
+      ${trendRows || '<div class="hint">还没有趋势数据</div>'}
+    </section>
   `
+}
+
+function renderTrendRow(metric: DailyMetric): string {
+  return `<div class="hint">${metric.day} | ${metric.sessionsStarted} | ${metric.sessionsSucceeded}/${metric.sessionsFailed} | ${metric.actionsCompleted} | ${(metric.targetThemeExposureRate * 100).toFixed(0)}% | ${metric.authorDiversityScore.toFixed(2)}</div>`
 }
 
 async function loadState(): Promise<PopupState> {
@@ -126,8 +150,18 @@ async function mount(): Promise<void> {
 
   const fallbackState: PopupState = {
     settings: defaultSettings,
-    session: { status: "idle", currentPlan: null, startedAt: null, lastError: null },
-    stats: { sessionsStarted: 0, actionsCompleted: 0, targetThemeExposureRate: 0, authorDiversityScore: 0, lastRunAt: null }
+    session: { status: "idle", currentPlan: null, startedAt: null, lastError: null, lastCompletedAt: null },
+    stats: {
+      sessionsStarted: 0,
+      sessionsSucceeded: 0,
+      sessionsFailed: 0,
+      actionsCompleted: 0,
+      targetThemeExposureRate: 0,
+      authorDiversityScore: 0,
+      lastRunAt: null,
+      lastSuccessfulRunAt: null,
+      dailyMetrics: []
+    }
   }
 
   let state = await loadState().catch(() => ({

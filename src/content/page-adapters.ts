@@ -14,13 +14,17 @@ export function collectFeedSnapshot(themes: ThemePlan[]): FeedSnapshot {
   const tweets = Array.from(document.querySelectorAll<HTMLElement>(SELECTORS.tweet))
   const themeMatches = Object.fromEntries(themes.map((theme) => [theme.name, 0]))
   const authors = new Set<string>()
+  let candidateQualityScore = 0
 
   for (const tweet of tweets) {
     const text = tweet.innerText.toLowerCase()
+    const hasMedia = Boolean(tweet.querySelector('[data-testid="tweetPhoto"], video'))
+    const lengthScore = Math.min(text.length / 180, 1)
 
     for (const theme of themes) {
       if (theme.keywords.some((keyword) => text.includes(keyword.toLowerCase()))) {
         themeMatches[theme.name] += 1
+        candidateQualityScore += 1 + lengthScore + (hasMedia ? 0.5 : 0)
       }
     }
 
@@ -31,7 +35,8 @@ export function collectFeedSnapshot(themes: ThemePlan[]): FeedSnapshot {
   return {
     totalTweets: tweets.length,
     themeMatches,
-    authorHandles: [...authors]
+    authorHandles: [...authors],
+    candidateQualityScore: tweets.length === 0 ? 0 : Number((candidateQualityScore / tweets.length).toFixed(2))
   }
 }
 

@@ -1,6 +1,6 @@
 import type { ActionPlan, ThemePlan } from "@shared/types"
 import { SELECTORS } from "@shared/constants"
-import { buildSearchUrl, getTweetArticles } from "./page-adapters"
+import { buildSearchUrl, detectPageKind, getTweetArticles } from "./page-adapters"
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, ms))
@@ -25,12 +25,34 @@ function selectBestArticle(theme?: ThemePlan): HTMLElement | null {
   const ranked = articles
     .map((article) => ({
       article,
-      score: scoreTextForTheme(article.innerText, theme)
+      score:
+        scoreTextForTheme(article.innerText, theme) +
+        (article.querySelector('[data-testid="tweetPhoto"], video') ? 0.5 : 0) +
+        Math.min(article.innerText.length / 220, 1)
     }))
     .filter((entry) => entry.article.querySelector('a[href*="/status/"]'))
     .sort((left, right) => right.score - left.score)
 
   return ranked[0]?.article ?? articles[0] ?? null
+}
+
+function clickElement(target: HTMLElement | null | undefined, reason: string): void {
+  if (!target) {
+    throw new Error(`Missing target for ${reason}`)
+  }
+
+  target.click()
+}
+
+async function waitForPageKind(expected: Array<ReturnType<typeof detectPageKind>>, timeoutMs = 8000): Promise<void> {
+  const startedAt = Date.now()
+
+  while (Date.now() - startedAt < timeoutMs) {
+    if (expected.includes(detectPageKind())) return
+    await sleep(250)
+  }
+
+  throw new Error(`Timed out waiting for page kind: ${expected.join(", ")}`)
 }
 
 export async function executeAction(action: ActionPlan, themes: ThemePlan[]): Promise<void> {
@@ -40,13 +62,13 @@ export async function executeAction(action: ActionPlan, themes: ThemePlan[]): Pr
     case "search":
       if (!action.query) return
       window.location.href = buildSearchUrl(action.query)
-      await sleep(2500)
+      await waitForPageKind(["search"])
       return
     case "openDetail": {
       const target = selectBestArticle(theme)
       const detailLink = target?.querySelector<HTMLAnchorElement>('a[href*="/status/"]')
-      detailLink?.click()
-      await sleep(2200)
+      clickElement(detailLink, "openDetail")
+      await waitForPageKind(["tweetDetail", "search", "home"])
       return
     }
     case "dwell":
@@ -62,8 +84,8 @@ export async function executeAction(action: ActionPlan, themes: ThemePlan[]): Pr
     case "openAuthor": {
       const target = selectBestArticle(theme)
       const profileLink = target?.querySelector<HTMLAnchorElement>('a[role="link"][href^="/"]:not([href*="/status/"])')
-      profileLink?.click()
-      await sleep(2000)
+      clickElement(profileLink, "openAuthor")
+      await waitForPageKind(["profile"])
       return
     }
     case "scrollProfile":
@@ -73,14 +95,14 @@ export async function executeAction(action: ActionPlan, themes: ThemePlan[]): Pr
     case "like": {
       if (!maybe(action.probability)) return
       const likeButton = document.querySelector<HTMLElement>('[data-testid="like"]')
-      likeButton?.click()
+      clickElement(likeButton, "like")
       await sleep(1200)
       return
     }
     case "bookmark": {
       if (!maybe(action.probability)) return
       const bookmarkButton = document.querySelector<HTMLElement>('[data-testid="bookmark"]')
-      bookmarkButton?.click()
+      clickElement(bookmarkButton, "bookmark")
       await sleep(1200)
       return
     }
@@ -89,14 +111,14 @@ export async function executeAction(action: ActionPlan, themes: ThemePlan[]): Pr
       const button = Array.from(document.querySelectorAll<HTMLElement>('[role="button"]')).find((item) =>
         /follow/i.test(item.innerText)
       )
-      button?.click()
+      clickElement(button, "follow")
       await sleep(1400)
       return
     }
     case "observeHome":
       if (!window.location.pathname.startsWith("/home")) {
         window.location.href = "https://x.com/home"
-        await sleep(2500)
+        await waitForPageKind(["home"])
       }
       window.scrollBy({ top: 900, behavior: "smooth" })
       await sleep(action.dwellMs ?? 9000)
@@ -118,4 +140,6 @@ export async function waitForPageReady(timeoutMs = 10000): Promise<void> {
     if (ready) return
     await sleep(300)
   }
+
+  throw new Error("Timed out waiting for page readiness")
 }

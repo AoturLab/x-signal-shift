@@ -27,7 +27,9 @@ function toStrategyProfile(settings: UserSettings): StrategyProfile {
 }
 
 function pickQueries(theme: ThemePlan, count: number): string[] {
-  return theme.keywords.slice(0, Math.max(1, count))
+  return [...theme.keywords]
+    .sort((left, right) => right.length - left.length)
+    .slice(0, Math.max(1, count))
 }
 
 function jitter(minMs: number, maxMs: number): number {
@@ -37,14 +39,19 @@ function jitter(minMs: number, maxMs: number): number {
 export function buildSessionPlan(settings: UserSettings): SessionPlan {
   const profile = toStrategyProfile(settings)
   const actions: ActionPlan[] = []
+  const orderedThemes = [...settings.themes].sort((left, right) => right.weight - left.weight)
 
-  for (const theme of settings.themes) {
+  for (const theme of orderedThemes) {
     for (const query of pickQueries(theme, profile.limits.maxSearchesPerSession)) {
-      actions.push({ type: "search", theme: theme.name, query })
-      actions.push({ type: "openDetail", theme: theme.name, maxItems: 2 })
+      actions.push({ type: "search", theme: theme.name, query, retries: 1 })
+      actions.push({ type: "openDetail", theme: theme.name, maxItems: 3, retries: 1 })
       actions.push({ type: "dwell", theme: theme.name, dwellMs: jitter(12000, 24000) })
-      actions.push({ type: "openAuthor", theme: theme.name, maxItems: 1 })
+      actions.push({ type: "openAuthor", theme: theme.name, maxItems: 1, retries: 1 })
       actions.push({ type: "scrollProfile", theme: theme.name, dwellMs: jitter(8000, 14000) })
+
+      if (Math.random() > 0.4) {
+        actions.push({ type: "expandReplies", theme: theme.name, probability: 0.45 })
+      }
 
       if (profile.actionMix.like > 0) {
         actions.push({ type: "like", theme: theme.name, probability: settings.riskLevel === "conservative" ? 0.15 : 0.35 })
@@ -60,7 +67,7 @@ export function buildSessionPlan(settings: UserSettings): SessionPlan {
     }
   }
 
-  actions.push({ type: "observeHome", theme: settings.themes[0]?.name ?? "general", dwellMs: jitter(7000, 14000) })
+  actions.push({ type: "observeHome", theme: orderedThemes[0]?.name ?? "general", dwellMs: jitter(7000, 14000) })
 
   return {
     id: crypto.randomUUID(),

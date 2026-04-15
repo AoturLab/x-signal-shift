@@ -15,20 +15,40 @@ function delayBetweenActions(): Promise<void> {
 async function runPlan(plan: SessionPlan, settings: UserSettings): Promise<void> {
   activePlanId = plan.id
   aborted = false
+  const failures: string[] = []
+  let actionsCompleted = 0
 
   try {
     await waitForPageReady()
 
     for (const action of plan.actions) {
       if (aborted || activePlanId !== plan.id) break
-      await executeAction(action, settings.themes)
+      try {
+        await executeAction(action, settings.themes)
+        actionsCompleted += 1
+      } catch (error) {
+        const message = error instanceof Error ? error.message : `Unknown failure in ${action.type}`
+        failures.push(`${action.type}: ${message}`)
+
+        if (window.history.length > 1 && action.type !== "search" && action.type !== "observeHome") {
+          window.history.back()
+          await delayBetweenActions()
+          await waitForPageReady().catch(() => undefined)
+        }
+      }
+
       await delayBetweenActions()
     }
 
     const summary = collectFeedSnapshot(settings.themes)
     await chrome.runtime.sendMessage({
       type: "PLAN_FINISHED",
-      payload: { summary }
+      payload: {
+        summary,
+        actionsAttempted: plan.actions.length,
+        actionsCompleted,
+        failures
+      }
     } satisfies RuntimeEnvelope<"PLAN_FINISHED">)
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown content execution failure"

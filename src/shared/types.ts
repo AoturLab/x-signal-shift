@@ -40,6 +40,7 @@ export interface ActionPlan {
   dwellMs?: number
   maxItems?: number
   probability?: number
+  retries?: number
 }
 
 export interface SessionPlan {
@@ -54,20 +55,43 @@ export interface SessionState {
   currentPlan: SessionPlan | null
   startedAt: number | null
   lastError: string | null
+  lastCompletedAt: number | null
+}
+
+export interface DailyMetric {
+  day: string
+  sessionsStarted: number
+  sessionsSucceeded: number
+  sessionsFailed: number
+  actionsCompleted: number
+  targetThemeExposureRate: number
+  authorDiversityScore: number
 }
 
 export interface StatsSnapshot {
   sessionsStarted: number
+  sessionsSucceeded: number
+  sessionsFailed: number
   actionsCompleted: number
   targetThemeExposureRate: number
   authorDiversityScore: number
   lastRunAt: number | null
+  lastSuccessfulRunAt: number | null
+  dailyMetrics: DailyMetric[]
 }
 
 export interface FeedSnapshot {
   totalTweets: number
   themeMatches: Record<string, number>
   authorHandles: string[]
+  candidateQualityScore: number
+}
+
+export interface SessionExecutionSummary {
+  summary: FeedSnapshot
+  actionsAttempted: number
+  actionsCompleted: number
+  failures: string[]
 }
 
 export interface StrategyProfile {
@@ -90,6 +114,6 @@ export interface RuntimeMessageMap {
   START_AUTOMATION: undefined
   STOP_AUTOMATION: undefined
   RUN_PLAN: SessionPlan
-  PLAN_FINISHED: { summary: FeedSnapshot }
+  PLAN_FINISHED: SessionExecutionSummary
   PLAN_FAILED: { error: string }
 }

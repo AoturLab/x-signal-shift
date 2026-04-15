@@ -8,9 +8,11 @@ import {
   getStats,
   setSessionState,
   setSettings,
-  setStats
+  setStats,
+  todayKey,
+  updateDailyMetrics
 } from "@shared/storage"
-import type { FeedSnapshot, SessionState, StatsSnapshot, UserSettings } from "@shared/types"
+import type { FeedSnapshot, SessionExecutionSummary, SessionState, StatsSnapshot, UserSettings } from "@shared/types"
 
 const TRAINING_ALARM = "training-session"
 
@@ -31,6 +33,11 @@ async function updateSessionState(partial: Partial<SessionState>): Promise<Sessi
 }
 
 async function startAutomation(): Promise<{ ok: boolean; reason?: string }> {
+  const currentSession = await getSessionState()
+  if (currentSession.status === "running") {
+    return { ok: false, reason: "A training session is already running." }
+  }
+
   const settings = await getSettings()
   if (!settings.enabled) {
     return { ok: false, reason: "Automation is disabled in settings." }
@@ -50,10 +57,15 @@ async function startAutomation(): Promise<{ ok: boolean; reason?: string }> {
   })
 
   const stats = await getStats().catch(() => defaultStats)
+  const day = todayKey()
   await setStats({
     ...stats,
     sessionsStarted: stats.sessionsStarted + 1,
-    lastRunAt: Date.now()
+    lastRunAt: Date.now(),
+    dailyMetrics: updateDailyMetrics(stats.dailyMetrics, day, (metric) => ({
+      ...metric,
+      sessionsStarted: metric.sessionsStarted + 1
+    }))
   })
 
   await chrome.tabs.sendMessage(tab.id, {
@@ -143,33 +155,57 @@ chrome.runtime.onMessage.addListener((message: RuntimeEnvelope, _sender, sendRes
         return
       }
       case "PLAN_FINISHED": {
-        const { summary } = message.payload as { summary: FeedSnapshot }
+        const { summary, actionsCompleted, failures } = message.payload as SessionExecutionSummary
         const stats = await getStats()
         const metrics = summarizeFeed(summary)
         const session = await getSessionState()
+        const day = todayKey()
+        const succeeded = failures.length === 0
 
         await setStats({
           ...stats,
-          actionsCompleted: stats.actionsCompleted + (session.currentPlan?.actions.length ?? 0),
+          sessionsSucceeded: stats.sessionsSucceeded + (succeeded ? 1 : 0),
+          sessionsFailed: stats.sessionsFailed + (succeeded ? 0 : 1),
+          actionsCompleted: stats.actionsCompleted + actionsCompleted,
           targetThemeExposureRate: metrics.targetThemeExposureRate,
           authorDiversityScore: metrics.authorDiversityScore,
-          lastRunAt: Date.now()
+          lastRunAt: Date.now(),
+          lastSuccessfulRunAt: succeeded ? Date.now() : stats.lastSuccessfulRunAt,
+          dailyMetrics: updateDailyMetrics(stats.dailyMetrics, day, (metric) => ({
+            ...metric,
+            sessionsSucceeded: metric.sessionsSucceeded + (succeeded ? 1 : 0),
+            sessionsFailed: metric.sessionsFailed + (succeeded ? 0 : 1),
+            actionsCompleted: metric.actionsCompleted + actionsCompleted,
+            targetThemeExposureRate: metrics.targetThemeExposureRate,
+            authorDiversityScore: metrics.authorDiversityScore
+          }))
         })
 
         await updateSessionState({
           status: "idle",
           currentPlan: null,
           startedAt: null,
-          lastError: null
+          lastError: failures[0] ?? null,
+          lastCompletedAt: Date.now()
         })
 
         sendResponse({ ok: true })
         return
       }
       case "PLAN_FAILED": {
+        const stats = await getStats()
+        const day = todayKey()
         await updateSessionState({
           status: "error",
           lastError: (message.payload as { error: string }).error
+        })
+        await setStats({
+          ...stats,
+          sessionsFailed: stats.sessionsFailed + 1,
+          dailyMetrics: updateDailyMetrics(stats.dailyMetrics, day, (metric) => ({
+            ...metric,
+            sessionsFailed: metric.sessionsFailed + 1
+          }))
         })
         sendResponse({ ok: true })
         return

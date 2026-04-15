@@ -1,5 +1,5 @@
 import { STORAGE_KEYS } from "./constants"
-import type { SessionState, StatsSnapshot, UserSettings } from "./types"
+import type { DailyMetric, SessionState, StatsSnapshot, UserSettings } from "./types"
 
 export const defaultSettings: UserSettings = {
   enabled: false,
@@ -24,15 +24,46 @@ export const defaultSessionState: SessionState = {
   status: "idle",
   currentPlan: null,
   startedAt: null,
-  lastError: null
+  lastError: null,
+  lastCompletedAt: null
 }
 
 export const defaultStats: StatsSnapshot = {
   sessionsStarted: 0,
+  sessionsSucceeded: 0,
+  sessionsFailed: 0,
   actionsCompleted: 0,
   targetThemeExposureRate: 0,
   authorDiversityScore: 0,
-  lastRunAt: null
+  lastRunAt: null,
+  lastSuccessfulRunAt: null,
+  dailyMetrics: []
+}
+
+export function todayKey(timestamp = Date.now()): string {
+  return new Date(timestamp).toISOString().slice(0, 10)
+}
+
+export function updateDailyMetrics(
+  metrics: DailyMetric[],
+  day: string,
+  updater: (current: DailyMetric) => DailyMetric
+): DailyMetric[] {
+  const existing =
+    metrics.find((item) => item.day === day) ?? {
+      day,
+      sessionsStarted: 0,
+      sessionsSucceeded: 0,
+      sessionsFailed: 0,
+      actionsCompleted: 0,
+      targetThemeExposureRate: 0,
+      authorDiversityScore: 0
+    }
+
+  const next = updater(existing)
+  const filtered = metrics.filter((item) => item.day !== day)
+
+  return [...filtered, next].sort((left, right) => left.day.localeCompare(right.day)).slice(-7)
 }
 
 export async function getSettings(): Promise<UserSettings> {
