@@ -52,6 +52,8 @@ async function startAutomation(): Promise<{ ok: boolean; reason?: string }> {
   await updateSessionState({
     status: "running",
     currentPlan: plan,
+    currentActionIndex: 0,
+    currentActionLabel: plan.actions[0]?.type ?? null,
     startedAt: Date.now(),
     lastError: null
   })
@@ -68,10 +70,40 @@ async function startAutomation(): Promise<{ ok: boolean; reason?: string }> {
     }))
   })
 
-  await chrome.tabs.sendMessage(tab.id, {
-    type: "RUN_PLAN",
-    payload: plan
-  } satisfies RuntimeEnvelope<"RUN_PLAN">)
+  try {
+    await chrome.tabs.sendMessage(tab.id, {
+      type: "RUN_PLAN",
+      payload: plan
+    } satisfies RuntimeEnvelope<"RUN_PLAN">)
+  } catch (error) {
+    await updateSessionState({
+      status: "error",
+      currentPlan: null,
+      currentActionIndex: 0,
+      currentActionLabel: null,
+      startedAt: null,
+      lastError: "Content script unavailable. Refresh the X tab and try again."
+    })
+
+    const stats = await getStats().catch(() => defaultStats)
+    const day = todayKey()
+    await setStats({
+      ...stats,
+      sessionsFailed: stats.sessionsFailed + 1,
+      dailyMetrics: updateDailyMetrics(stats.dailyMetrics, day, (metric) => ({
+        ...metric,
+        sessionsFailed: metric.sessionsFailed + 1
+      }))
+    })
+
+    return {
+      ok: false,
+      reason:
+        error instanceof Error
+          ? `Content script unavailable. Refresh the X tab and try again. (${error.message})`
+          : "Content script unavailable. Refresh the X tab and try again."
+    }
+  }
 
   return { ok: true }
 }
@@ -135,10 +167,14 @@ chrome.runtime.onMessage.addListener((message: RuntimeEnvelope, _sender, sendRes
       case "STOP_AUTOMATION": {
         const tab = await queryActiveXTab()
         if (tab?.id) {
-          await chrome.tabs.sendMessage(
-            tab.id,
-            { type: "STOP_AUTOMATION", payload: undefined } satisfies RuntimeEnvelope<"STOP_AUTOMATION">
-          )
+          try {
+            await chrome.tabs.sendMessage(
+              tab.id,
+              { type: "STOP_AUTOMATION", payload: undefined } satisfies RuntimeEnvelope<"STOP_AUTOMATION">
+            )
+          } catch {
+            // The tab likely has no injected content script yet; stopping local state is still safe.
+          }
         }
 
         const settings = await getSettings()
@@ -149,7 +185,28 @@ chrome.runtime.onMessage.addListener((message: RuntimeEnvelope, _sender, sendRes
         await updateSessionState({
           status: "idle",
           currentPlan: null,
+          currentActionIndex: 0,
+          currentActionLabel: null,
           startedAt: null
+        })
+        sendResponse({ ok: true })
+        return
+      }
+      case "ACTION_EVENT": {
+        const { entry, currentActionIndex, currentActionLabel } = message.payload as {
+          entry: import("@shared/types").ExecutionLogEntry
+          currentActionIndex: number
+          currentActionLabel: string | null
+        }
+        const stats = await getStats()
+        await setStats({
+          ...stats,
+          recentLogs: [...stats.recentLogs, entry].slice(-50)
+        })
+        await updateSessionState({
+          currentActionIndex,
+          currentActionLabel,
+          lastError: entry.level === "error" ? entry.message : null
         })
         sendResponse({ ok: true })
         return
@@ -184,6 +241,8 @@ chrome.runtime.onMessage.addListener((message: RuntimeEnvelope, _sender, sendRes
         await updateSessionState({
           status: "idle",
           currentPlan: null,
+          currentActionIndex: 0,
+          currentActionLabel: null,
           startedAt: null,
           lastError: failures[0] ?? null,
           lastCompletedAt: Date.now()
@@ -197,6 +256,8 @@ chrome.runtime.onMessage.addListener((message: RuntimeEnvelope, _sender, sendRes
         const day = todayKey()
         await updateSessionState({
           status: "error",
+          currentActionIndex: 0,
+          currentActionLabel: null,
           lastError: (message.payload as { error: string }).error
         })
         await setStats({

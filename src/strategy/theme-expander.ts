@@ -32,3 +32,19 @@ export function buildThemePlan(
     exclusions: []
   }
 }
+
+export function buildCustomThemePlan(
+  customKeywords: string[],
+  languagePreference: LanguagePreference
+): ThemePlan | null {
+  const keywords = Array.from(new Set(customKeywords.map((item) => item.trim()).filter(Boolean)))
+  if (keywords.length === 0) return null
+
+  return {
+    name: "自定义",
+    weight: 1,
+    languages: normalizeLanguages(languagePreference),
+    keywords,
+    exclusions: []
+  }
+}

@@ -1,13 +1,26 @@
 import { DEFAULT_THEMES } from "@shared/constants"
 import { sendRuntimeMessage } from "@shared/messages"
-import { buildThemePlan } from "@strategy/theme-expander"
+import { buildCustomThemePlan, buildThemePlan } from "@strategy/theme-expander"
 import { defaultSettings } from "@shared/storage"
-import type { DailyMetric, LanguagePreference, RiskLevel, SessionState, StatsSnapshot, UserSettings } from "@shared/types"
+import type {
+  DailyMetric,
+  ExecutionLogEntry,
+  LanguagePreference,
+  RiskLevel,
+  SessionState,
+  StatsSnapshot,
+  UserSettings
+} from "@shared/types"
 
 interface PopupState {
   settings: UserSettings
   session: SessionState
   stats: StatsSnapshot
+}
+
+interface StartResponse {
+  ok?: boolean
+  reason?: string
 }
 
 function render(state: PopupState): string {
@@ -19,6 +32,13 @@ function render(state: PopupState): string {
     .reverse()
     .map((metric) => renderTrendRow(metric))
     .join("")
+  const logRows = state.stats.recentLogs
+    .slice()
+    .reverse()
+    .map((entry) => renderLogRow(entry))
+    .join("")
+  const totalActions = state.session.currentPlan?.actions.length ?? 0
+  const currentStep = totalActions === 0 ? 0 : Math.min(state.session.currentActionIndex + 1, totalActions)
 
   return `
     <section class="panel">
@@ -49,6 +69,7 @@ function render(state: PopupState): string {
         </div>
       </div>
       <div class="hint">当前主题：${themeNames || "未设置"}</div>
+      <div class="hint">当前步骤：${currentStep}/${totalActions} ${state.session.currentActionLabel ?? ""}</div>
       ${state.session.lastError ? `<div class="hint">最近错误：${state.session.lastError}</div>` : ""}
     </section>
 
@@ -105,11 +126,25 @@ function render(state: PopupState): string {
       <div class="hint">日期 | 会话 | 成功/失败 | 动作 | 曝光率 | 多样性</div>
       ${trendRows || '<div class="hint">还没有趋势数据</div>'}
     </section>
+
+    <section class="panel">
+      <div>
+        <h1>执行日志</h1>
+        <p>最近 50 条动作事件。</p>
+      </div>
+      ${logRows || '<div class="hint">还没有日志</div>'}
+    </section>
   `
 }
 
 function renderTrendRow(metric: DailyMetric): string {
   return `<div class="hint">${metric.day} | ${metric.sessionsStarted} | ${metric.sessionsSucceeded}/${metric.sessionsFailed} | ${metric.actionsCompleted} | ${(metric.targetThemeExposureRate * 100).toFixed(0)}% | ${metric.authorDiversityScore.toFixed(2)}</div>`
+}
+
+function renderLogRow(entry: ExecutionLogEntry): string {
+  const time = new Date(entry.time).toLocaleTimeString("zh-CN", { hour12: false })
+  const tone = entry.level === "error" ? "#fda4af" : entry.level === "success" ? "#86efac" : "#93c5fd"
+  return `<div class="hint" style="color:${tone}">${time} | #${entry.actionIndex + 1} | ${entry.actionType} | ${entry.message}</div>`
 }
 
 async function loadState(): Promise<PopupState> {
@@ -129,9 +164,11 @@ function collectSettings(current: UserSettings): UserSettings {
     (document.querySelector<HTMLSelectElement>("#languagePreference")?.value as LanguagePreference) ?? "bilingual"
   const riskLevel = (document.querySelector<HTMLSelectElement>("#riskLevel")?.value as RiskLevel) ?? "conservative"
   const dailySessionCount = Number(document.querySelector<HTMLInputElement>("#sessionCount")?.value ?? current.dailySessionCount)
-  const themes = (selectedThemes.length ? selectedThemes : DEFAULT_THEMES.slice(0, 1)).map((theme) =>
-    buildThemePlan(theme, 1, languagePreference, customKeywords)
+  const selectedThemePlans = (selectedThemes.length ? selectedThemes : DEFAULT_THEMES.slice(0, 1)).map((theme) =>
+    buildThemePlan(theme, 1, languagePreference)
   )
+  const customTheme = buildCustomThemePlan(customKeywords, languagePreference)
+  const themes = customTheme ? [...selectedThemePlans, customTheme] : selectedThemePlans
 
   return {
     ...current,
@@ -150,7 +187,15 @@ async function mount(): Promise<void> {
 
   const fallbackState: PopupState = {
     settings: defaultSettings,
-    session: { status: "idle", currentPlan: null, startedAt: null, lastError: null, lastCompletedAt: null },
+    session: {
+      status: "idle",
+      currentPlan: null,
+      currentActionIndex: 0,
+      currentActionLabel: null,
+      startedAt: null,
+      lastError: null,
+      lastCompletedAt: null
+    },
     stats: {
       sessionsStarted: 0,
       sessionsSucceeded: 0,
@@ -160,7 +205,8 @@ async function mount(): Promise<void> {
       authorDiversityScore: 0,
       lastRunAt: null,
       lastSuccessfulRunAt: null,
-      dailyMetrics: []
+      dailyMetrics: [],
+      recentLogs: []
     }
   }
 
@@ -181,8 +227,18 @@ async function mount(): Promise<void> {
     document.querySelector<HTMLButtonElement>("#startBtn")?.addEventListener("click", async () => {
       const nextSettings = collectSettings(state.settings)
       await sendRuntimeMessage("SAVE_SETTINGS", nextSettings)
-      await sendRuntimeMessage("START_AUTOMATION", undefined)
+      const response = (await sendRuntimeMessage("START_AUTOMATION", undefined)) as StartResponse
       state = await loadState()
+      if (response?.ok === false && response.reason) {
+        state = {
+          ...state,
+          session: {
+            ...state.session,
+            status: "error",
+            lastError: response.reason
+          }
+        }
+      }
       rerender()
     })
 

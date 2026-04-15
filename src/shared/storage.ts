@@ -23,6 +23,8 @@ export const defaultSettings: UserSettings = {
 export const defaultSessionState: SessionState = {
   status: "idle",
   currentPlan: null,
+  currentActionIndex: 0,
+  currentActionLabel: null,
   startedAt: null,
   lastError: null,
   lastCompletedAt: null
@@ -37,7 +39,8 @@ export const defaultStats: StatsSnapshot = {
   authorDiversityScore: 0,
   lastRunAt: null,
   lastSuccessfulRunAt: null,
-  dailyMetrics: []
+  dailyMetrics: [],
+  recentLogs: []
 }
 
 export function todayKey(timestamp = Date.now()): string {

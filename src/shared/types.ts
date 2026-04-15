@@ -53,9 +53,22 @@ export interface SessionPlan {
 export interface SessionState {
   status: RuntimeStatus
   currentPlan: SessionPlan | null
+  currentActionIndex: number
+  currentActionLabel: string | null
   startedAt: number | null
   lastError: string | null
   lastCompletedAt: number | null
+}
+
+export type LogLevel = "info" | "success" | "error"
+
+export interface ExecutionLogEntry {
+  id: string
+  time: number
+  level: LogLevel
+  actionIndex: number
+  actionType: ActionType | "system"
+  message: string
 }
 
 export interface DailyMetric {
@@ -78,6 +91,7 @@ export interface StatsSnapshot {
   lastRunAt: number | null
   lastSuccessfulRunAt: number | null
   dailyMetrics: DailyMetric[]
+  recentLogs: ExecutionLogEntry[]
 }
 
 export interface FeedSnapshot {
@@ -114,6 +128,7 @@ export interface RuntimeMessageMap {
   START_AUTOMATION: undefined
   STOP_AUTOMATION: undefined
   RUN_PLAN: SessionPlan
+  ACTION_EVENT: { entry: ExecutionLogEntry; currentActionIndex: number; currentActionLabel: string | null }
   PLAN_FINISHED: SessionExecutionSummary
   PLAN_FAILED: { error: string }
 }
