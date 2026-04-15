@@ -80,6 +80,32 @@ function ensureControlPanel(): ShadowRoot | null {
       display: grid;
       gap: 10px;
     }
+    .drawer .panel,
+    .drawer .panel-content > .panel {
+      background:
+        radial-gradient(circle at top right, rgba(34, 211, 238, 0.09), transparent 30%),
+        linear-gradient(180deg, rgba(15, 23, 42, 0.98), rgba(7, 13, 24, 0.98));
+      border-color: rgba(71, 85, 105, 0.38);
+      box-shadow: 0 20px 48px rgba(2, 8, 23, 0.42);
+      backdrop-filter: none;
+    }
+    .drawer .hint,
+    .drawer .trend-head,
+    .drawer .log-row,
+    .drawer p {
+      color: #cbd5e1;
+    }
+    .drawer .stat {
+      background: rgba(15, 23, 42, 0.94);
+      border-color: rgba(71, 85, 105, 0.34);
+    }
+    .drawer .stat span {
+      color: #94a3b8;
+    }
+    .drawer .step-chip {
+      background: linear-gradient(135deg, rgba(8, 145, 178, 0.34), rgba(29, 78, 216, 0.26));
+      color: #eff6ff;
+    }
     .drawer.open {
       opacity: 1;
       pointer-events: auto;

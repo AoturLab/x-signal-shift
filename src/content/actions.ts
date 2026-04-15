@@ -73,14 +73,16 @@ function buildResult(
   message: string,
   startedAt: number,
   pageBefore: PageKind,
-  pageAfter = detectPageKind()
+  pageAfter = detectPageKind(),
+  targetUrl?: string
 ): ActionExecutionResult {
   return {
     status,
     message,
     durationMs: Date.now() - startedAt,
     pageBefore,
-    pageAfter
+    pageAfter,
+    targetUrl
   }
 }
 
@@ -100,16 +102,31 @@ export async function executeAction(action: ActionPlan, themes: ThemePlan[]): Pr
         return buildResult("completed", `Completed search for ${action.queryLabel ?? action.theme}`, startedAt, pageBefore)
       }
 
-      window.location.assign(targetUrl)
-      await sleep(randomBetween(240, 520))
-      return buildResult("navigating", `Navigating search for ${action.queryLabel ?? action.theme}`, startedAt, pageBefore, "search")
+      await sleep(randomBetween(120, 240))
+      return buildResult(
+        "navigating",
+        `Navigating search for ${action.queryLabel ?? action.theme}`,
+        startedAt,
+        pageBefore,
+        "search",
+        targetUrl
+      )
     }
     case "openDetail": {
       const target = await waitForCandidateArticle(theme)
       const detailLink = target.querySelector<HTMLAnchorElement>('a[href*="/status/"]')
-      clickElement(detailLink, "openDetail")
-      await sleep(randomBetween(220, 480))
-      return buildResult("navigating", `Opening detail for ${action.queryLabel ?? action.theme}`, startedAt, pageBefore, "tweetDetail")
+      if (!detailLink?.href) {
+        throw new Error("Missing target for openDetail")
+      }
+      await sleep(randomBetween(120, 220))
+      return buildResult(
+        "navigating",
+        `Opening detail for ${action.queryLabel ?? action.theme}`,
+        startedAt,
+        pageBefore,
+        "tweetDetail",
+        detailLink.href
+      )
     }
     case "dwell":
       await sleep(action.dwellMs ?? randomBetween(18000, 42000))
@@ -127,9 +144,18 @@ export async function executeAction(action: ActionPlan, themes: ThemePlan[]): Pr
     case "openAuthor": {
       const target = await waitForCandidateArticle(theme)
       const profileLink = target.querySelector<HTMLAnchorElement>('a[role="link"][href^="/"]:not([href*="/status/"])')
-      clickElement(profileLink, "openAuthor")
-      await sleep(randomBetween(220, 480))
-      return buildResult("navigating", `Opening author for ${action.queryLabel ?? action.theme}`, startedAt, pageBefore, "profile")
+      if (!profileLink?.href) {
+        throw new Error("Missing target for openAuthor")
+      }
+      await sleep(randomBetween(120, 220))
+      return buildResult(
+        "navigating",
+        `Opening author for ${action.queryLabel ?? action.theme}`,
+        startedAt,
+        pageBefore,
+        "profile",
+        profileLink.href
+      )
     }
     case "scrollProfile":
       for (let i = 0; i < randomBetween(2, 4); i += 1) {
@@ -163,9 +189,8 @@ export async function executeAction(action: ActionPlan, themes: ThemePlan[]): Pr
     }
     case "observeHome":
       if (!window.location.pathname.startsWith("/home")) {
-        window.location.assign("https://x.com/home")
-        await sleep(randomBetween(240, 520))
-        return buildResult("navigating", `Returning home for ${action.theme}`, startedAt, pageBefore, "home")
+        await sleep(randomBetween(120, 240))
+        return buildResult("navigating", `Returning home for ${action.theme}`, startedAt, pageBefore, "home", "https://x.com/home")
       }
       for (let i = 0; i < randomBetween(2, 5); i += 1) {
         window.scrollBy({ top: randomBetween(380, 960), behavior: "smooth" })

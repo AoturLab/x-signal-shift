@@ -126,6 +126,7 @@ export interface ActionExecutionResult {
   durationMs: number
   pageBefore: PageKind
   pageAfter: PageKind
+  targetUrl?: string
 }
 
 export interface StrategyProfile {

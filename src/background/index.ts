@@ -297,6 +297,19 @@ async function dispatchNextAction(): Promise<void> {
     }
 
     if (result.status === "navigating") {
+      if (result.targetUrl) {
+        try {
+          await chrome.tabs.update(tabId, { url: result.targetUrl })
+        } catch (error) {
+          await failSession(
+            error instanceof Error ? `Failed to navigate to target page. (${error.message})` : "Failed to navigate to target page.",
+            action,
+            session.currentActionIndex
+          )
+          return
+        }
+      }
+
       await appendLog(
         buildLogEntry(session.currentActionIndex, action.type, result.message, "success", {
           durationMs: result.durationMs,
