@@ -6,29 +6,56 @@ export interface PanelViewModel {
   stats: StatsSnapshot
 }
 
-export function buildPanelMarkup(model: PanelViewModel): string {
+export interface PanelViewOptions {
+  variant?: "popup" | "drawer"
+}
+
+export function buildPanelMarkup(model: PanelViewModel, options: PanelViewOptions = {}): string {
+  const variant = options.variant ?? "popup"
   const themeNames = model.settings.themes.map((theme) => theme.name).join(", ")
   const todayMetric = model.stats.dailyMetrics[model.stats.dailyMetrics.length - 1]
-  const trendRows = model.stats.dailyMetrics
-    .slice()
-    .reverse()
-    .map((metric) => renderTrendRow(metric))
-    .join("")
   const logRows = model.stats.recentLogs
     .slice()
     .reverse()
+    .slice(0, variant === "drawer" ? 8 : 50)
     .map((entry) => renderLogRow(entry))
     .join("")
   const totalActions = model.session.currentPlan?.actions.length ?? 0
   const currentStep = totalActions === 0 ? 0 : Math.min(model.session.currentActionIndex + 1, totalActions)
+  const heroCopy =
+    variant === "drawer"
+      ? "当前会话与失败定位都在这里，配置仍然放在扩展 popup。"
+      : "自动搜索、浏览、停留和低频互动，逐步重塑 X 对账号的兴趣画像。"
+  const trendMarkup =
+    variant === "drawer"
+      ? ""
+      : `
+    <section class="panel">
+      <div class="section-head">
+        <div>
+          <div class="eyebrow">Trend</div>
+          <h2>每日趋势</h2>
+        </div>
+        <p>最近 7 天训练结果</p>
+      </div>
+      <div class="trend-head">日期 | 会话 | 成功/失败 | 动作 | 曝光率 | 多样性</div>
+      ${
+        model.stats.dailyMetrics
+          .slice()
+          .reverse()
+          .map((metric) => renderTrendRow(metric))
+          .join("") || '<div class="hint">还没有趋势数据</div>'
+      }
+    </section>
+  `
 
   return `
-    <section class="panel hero">
+    <section class="panel hero ${variant === "drawer" ? "hero-compact" : ""}">
       <div class="hero-top">
         <div>
           <div class="eyebrow">SignalShift</div>
           <h1>反馈回路纠偏器</h1>
-          <p>自动搜索、浏览、停留和低频互动，逐步重塑 X 对账号的兴趣画像。</p>
+          <p>${heroCopy}</p>
         </div>
         <div class="orb"></div>
       </div>
@@ -60,17 +87,7 @@ export function buildPanelMarkup(model: PanelViewModel): string {
       <div class="step-chip">当前动作：${model.session.currentActionLabel ?? "-"}</div>
     </section>
 
-    <section class="panel">
-      <div class="section-head">
-        <div>
-          <div class="eyebrow">Trend</div>
-          <h2>每日趋势</h2>
-        </div>
-        <p>最近 7 天训练结果</p>
-      </div>
-      <div class="trend-head">日期 | 会话 | 成功/失败 | 动作 | 曝光率 | 多样性</div>
-      ${trendRows || '<div class="hint">还没有趋势数据</div>'}
-    </section>
+    ${trendMarkup}
 
     <section class="panel">
       <div class="section-head">
@@ -78,7 +95,7 @@ export function buildPanelMarkup(model: PanelViewModel): string {
           <div class="eyebrow">Trace</div>
           <h2>执行日志</h2>
         </div>
-        <p>最近 50 条动作事件</p>
+        <p>${variant === "drawer" ? "最近 8 条动作事件" : "最近 50 条动作事件"}</p>
       </div>
       <div class="log-list">
         ${logRows || '<div class="hint">还没有日志</div>'}
@@ -137,6 +154,9 @@ export const panelBaseStyles = `
     display: grid;
     gap: 12px;
     backdrop-filter: blur(16px);
+  }
+  .hero-compact {
+    gap: 10px;
   }
   .hero-top {
     display: flex;

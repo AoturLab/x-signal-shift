@@ -128,6 +128,9 @@ async function mount(): Promise<void> {
       currentPlan: null,
       currentActionIndex: 0,
       currentActionLabel: null,
+      activeTabId: null,
+      pendingNavigation: false,
+      lastKnownPageKind: "unknown",
       startedAt: null,
       lastError: null,
       lastCompletedAt: null
@@ -186,6 +189,16 @@ async function mount(): Promise<void> {
   }
 
   rerender()
+
+  chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName !== "local") return
+    if (!("session" in changes || "stats" in changes || "settings" in changes)) return
+
+    void (async () => {
+      state = await loadState().catch(() => state)
+      rerender()
+    })()
+  })
 }
 
 void mount()

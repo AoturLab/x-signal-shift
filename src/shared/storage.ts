@@ -25,6 +25,9 @@ export const defaultSessionState: SessionState = {
   currentPlan: null,
   currentActionIndex: 0,
   currentActionLabel: null,
+  activeTabId: null,
+  pendingNavigation: false,
+  lastKnownPageKind: "unknown",
   startedAt: null,
   lastError: null,
   lastCompletedAt: null

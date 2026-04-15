@@ -56,6 +56,9 @@ export interface SessionState {
   currentPlan: SessionPlan | null
   currentActionIndex: number
   currentActionLabel: string | null
+  activeTabId: number | null
+  pendingNavigation: boolean
+  lastKnownPageKind: PageKind
   startedAt: number | null
   lastError: string | null
   lastCompletedAt: number | null
@@ -112,6 +115,19 @@ export interface SessionExecutionSummary {
   failures: string[]
 }
 
+export interface PageContext {
+  pageKind: PageKind
+  url: string
+}
+
+export interface ActionExecutionResult {
+  status: "completed" | "navigating" | "skipped" | "failed"
+  message: string
+  durationMs: number
+  pageBefore: PageKind
+  pageAfter: PageKind
+}
+
 export interface StrategyProfile {
   dailySessionCount: number
   sessionDurationMinSec: number
@@ -131,8 +147,10 @@ export interface RuntimeMessageMap {
   SAVE_SETTINGS: UserSettings
   START_AUTOMATION: undefined
   STOP_AUTOMATION: undefined
-  RUN_PLAN: SessionPlan
-  ACTION_EVENT: { entry: ExecutionLogEntry; currentActionIndex: number; currentActionLabel: string | null }
+  EXECUTE_ACTION: { action: ActionPlan; actionIndex: number; themes: ThemePlan[] }
+  GET_PAGE_CONTEXT: undefined
+  COLLECT_FEED_SNAPSHOT: { themes: ThemePlan[] }
+  CONTENT_READY: PageContext
   PLAN_FINISHED: SessionExecutionSummary
   PLAN_FAILED: { error: string }
 }
