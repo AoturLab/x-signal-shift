@@ -144,7 +144,9 @@ function renderTrendRow(metric: DailyMetric): string {
 function renderLogRow(entry: ExecutionLogEntry): string {
   const time = new Date(entry.time).toLocaleTimeString("zh-CN", { hour12: false })
   const tone = entry.level === "error" ? "#fda4af" : entry.level === "success" ? "#86efac" : "#93c5fd"
-  return `<div class="hint" style="color:${tone}">${time} | #${entry.actionIndex + 1} | ${entry.actionType} | ${entry.message}</div>`
+  return `<div class="hint" style="color:${tone}">${time} | #${entry.actionIndex + 1} | ${entry.actionType} | ${entry.message}${
+    entry.durationMs ? ` | ${entry.durationMs}ms` : ""
+  }${entry.pageBefore || entry.pageAfter ? ` | ${entry.pageBefore ?? "-"} -> ${entry.pageAfter ?? "-"}` : ""}</div>`
 }
 
 async function loadState(): Promise<PopupState> {

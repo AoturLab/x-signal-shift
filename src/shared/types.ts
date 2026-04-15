@@ -69,6 +69,9 @@ export interface ExecutionLogEntry {
   actionIndex: number
   actionType: ActionType | "system"
   message: string
+  durationMs?: number
+  pageBefore?: PageKind
+  pageAfter?: PageKind
 }
 
 export interface DailyMetric {

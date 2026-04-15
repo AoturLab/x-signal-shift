@@ -1,4 +1,4 @@
-import { collectFeedSnapshot } from "./page-adapters"
+import { collectFeedSnapshot, detectPageKind } from "./page-adapters"
 import { executeAction, waitForPageReady } from "./actions"
 import type { RuntimeEnvelope } from "@shared/messages"
 import type { ActionPlan, ExecutionLogEntry, SessionPlan, SessionState, UserSettings } from "@shared/types"
@@ -20,7 +20,8 @@ function buildLogEntry(
   actionIndex: number,
   actionType: ActionPlan["type"] | "system",
   message: string,
-  level: ExecutionLogEntry["level"]
+  level: ExecutionLogEntry["level"],
+  details?: Partial<ExecutionLogEntry>
 ): ExecutionLogEntry {
   return {
     id: crypto.randomUUID(),
@@ -28,7 +29,8 @@ function buildLogEntry(
     level,
     actionIndex,
     actionType,
-    message
+    message,
+    ...details
   }
 }
 
@@ -220,7 +222,9 @@ async function renderControlPanel(shadow: ShadowRoot): Promise<void> {
                 entry.level === "error" ? "#fda4af" : entry.level === "success" ? "#86efac" : "#93c5fd"
               }">${new Date(entry.time).toLocaleTimeString("zh-CN", { hour12: false })} | #${entry.actionIndex + 1} | ${
                 entry.actionType
-              } | ${entry.message}</div>`
+              } | ${entry.message}${entry.durationMs ? ` | ${entry.durationMs}ms` : ""}${
+                entry.pageBefore || entry.pageAfter ? ` | ${entry.pageBefore ?? "-"} -> ${entry.pageAfter ?? "-"}` : ""
+              }</div>`
           )
           .join("")
       : '<div class="log">还没有日志</div>'
@@ -262,30 +266,47 @@ async function runPlan(plan: SessionPlan, settings: UserSettings, startIndex = 0
     for (let index = startIndex; index < plan.actions.length; index += 1) {
       const action = plan.actions[index]
       if (aborted || activePlanId !== plan.id) break
+      const pageBefore = detectPageKind()
+      const actionStartedAt = Date.now()
       try {
         await updateProgress(plan, index, { status: "running", currentActionLabel: action.type })
         await emitActionEvent(
-          buildLogEntry(index, action.type, `Starting ${action.type} for ${action.theme}`, "info"),
+          buildLogEntry(index, action.type, `Starting ${action.type} for ${action.theme}`, "info", {
+            pageBefore,
+            pageAfter: pageBefore
+          }),
           index,
           action.type
         )
         await executeAction(action, settings.themes)
         actionsCompleted += 1
+        const pageAfter = detectPageKind()
+        const durationMs = Date.now() - actionStartedAt
         await updateProgress(plan, index + 1, { lastError: null, currentActionLabel: plan.actions[index + 1]?.type ?? null })
         await emitActionEvent(
-          buildLogEntry(index, action.type, `Completed ${action.type} for ${action.theme}`, "success"),
+          buildLogEntry(index, action.type, `Completed ${action.type} for ${action.theme}`, "success", {
+            durationMs,
+            pageBefore,
+            pageAfter
+          }),
           index + 1,
           plan.actions[index + 1]?.type ?? null
         )
       } catch (error) {
         const message = error instanceof Error ? error.message : `Unknown failure in ${action.type}`
         failures.push(`${action.type}: ${message}`)
+        const pageAfter = detectPageKind()
+        const durationMs = Date.now() - actionStartedAt
         await updateProgress(plan, index + 1, {
           lastError: message,
           currentActionLabel: plan.actions[index + 1]?.type ?? null
         })
         await emitActionEvent(
-          buildLogEntry(index, action.type, `Failed ${action.type}: ${message}`, "error"),
+          buildLogEntry(index, action.type, `Failed ${action.type}: ${message}`, "error", {
+            durationMs,
+            pageBefore,
+            pageAfter
+          }),
           index + 1,
           plan.actions[index + 1]?.type ?? null
         )
